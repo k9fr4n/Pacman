@@ -49,40 +49,70 @@ export class Ghost {
     this.group = new THREE.Group();
     this.group.name = `Ghost-${this.name}`;
 
-    const bodyGeo = new THREE.SphereGeometry(0.4, 28, 20, 0, Math.PI * 2, 0, Math.PI * 0.65);
+    const R = 0.34;
     this.bodyMat = new THREE.MeshStandardMaterial({
       color: this.color,
       emissive: this.color,
-      emissiveIntensity: 1.3,
-      metalness: 0.2,
+      emissiveIntensity: 1.7,
+      metalness: 0.15,
       roughness: 0.4,
       transparent: true,
-      opacity: 0.95,
+      opacity: 1.0,
     });
-    this.body = new THREE.Mesh(bodyGeo, this.bodyMat);
-    this.group.add(this.body);
 
-    const skirtGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.35, 20, 1, true);
-    this.skirt = new THREE.Mesh(skirtGeo, this.bodyMat);
-    this.skirt.position.y = -0.25;
-    this.group.add(this.skirt);
+    // Rounded dome on top.
+    const domeGeo = new THREE.SphereGeometry(R, 28, 18, 0, Math.PI * 2, 0, Math.PI / 2);
+    this.dome = new THREE.Mesh(domeGeo, this.bodyMat);
+    this.dome.position.y = 0.05;
+    this.group.add(this.dome);
 
-    const eyeGeo = new THREE.SphereGeometry(0.1, 12, 12);
+    // Straight body (cylinder) below the dome.
+    const cylGeo = new THREE.CylinderGeometry(R, R, 0.38, 28, 1);
+    this.cyl = new THREE.Mesh(cylGeo, this.bodyMat);
+    this.cyl.position.y = -0.14;
+    this.group.add(this.cyl);
+
+    // 3 rounded "feet" at the bottom (classic ghost silhouette).
+    const footGeo = new THREE.SphereGeometry(R * 0.45, 14, 12);
+    this.feet = [];
+    [-0.62, 0, 0.62].forEach((fx) => {
+      const foot = new THREE.Mesh(footGeo, this.bodyMat);
+      foot.position.set(fx * R * 1.15, -0.33, 0);
+      this.group.add(foot);
+      this.feet.push(foot);
+    });
+
+    // BIG eyes on top of the dome — clearly visible from top-down camera.
+    const eyeGeo = new THREE.SphereGeometry(0.13, 16, 16);
     const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
     this.eyeL = new THREE.Mesh(eyeGeo, eyeMat);
     this.eyeR = new THREE.Mesh(eyeGeo, eyeMat);
-    this.eyeL.position.set(0.28, 0.1, -0.14);
-    this.eyeR.position.set(0.28, 0.1,  0.14);
+    this.eyeL.position.set(0.15, 0.22, -0.14);
+    this.eyeR.position.set(0.15, 0.22,  0.14);
     this.group.add(this.eyeL, this.eyeR);
 
-    const irisGeo = new THREE.SphereGeometry(0.05, 10, 10);
-    const irisMat = new THREE.MeshBasicMaterial({ color: 0x001122 });
+    // Bright blue irises — signature Pac-Man ghost look.
+    const irisGeo = new THREE.SphereGeometry(0.06, 12, 12);
+    const irisMat = new THREE.MeshBasicMaterial({ color: 0x0044ff });
     this.irisL = new THREE.Mesh(irisGeo, irisMat);
     this.irisR = new THREE.Mesh(irisGeo, irisMat);
     this.eyeL.add(this.irisL); this.eyeR.add(this.irisR);
-    this.irisL.position.x = 0.06; this.irisR.position.x = 0.06;
+    this.irisL.position.x = 0.08; this.irisR.position.x = 0.08;
 
-    this.glow = new THREE.PointLight(this.color, 1.3, 5, 2);
+    // Tron light-disc on the floor — strong color identifier viewed from above.
+    const discGeo = new THREE.RingGeometry(0.38, 0.55, 40);
+    const discMat = new THREE.MeshBasicMaterial({
+      color: this.color,
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+    });
+    this.disc = new THREE.Mesh(discGeo, discMat);
+    this.disc.rotation.x = -Math.PI / 2;
+    this.disc.position.y = -0.48;
+    this.group.add(this.disc);
+
+    this.glow = new THREE.PointLight(this.color, 1.6, 5, 2);
     this.group.add(this.glow);
   }
 
@@ -201,14 +231,16 @@ export class Ghost {
 
     if (this.inHouse) {
       this.releaseTimer -= dt;
-      // Pure oscillation (no drift).
-      const bobCenter = this.startRow;
-      this.row = bobCenter + Math.sin(performance.now() / 300) * 0.15;
-      if (this.releaseTimer <= 0) {
+      if (this.releaseTimer > 0) {
+        // Waiting for release — bob in place.
+        this.row = this.startRow + Math.sin(performance.now() / 300) * 0.15;
+      } else {
+        // Released — navigate to the door exit (no more bobbing).
         if (Math.abs(this.col - EXIT.col) > 0.08) {
-          this.col += Math.sign(EXIT.col - this.col) * dt * 3.2;
+          this.col += Math.sign(EXIT.col - this.col) * dt * 3.5;
         } else if (this.row > EXIT.row + 0.08) {
-          this.row -= dt * 3.2;
+          this.col = EXIT.col;
+          this.row -= dt * 3.5;
         } else {
           this.inHouse = false;
           this.col = EXIT.col;

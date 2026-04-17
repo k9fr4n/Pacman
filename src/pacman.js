@@ -40,28 +40,55 @@ export class Pacman {
     this.group = new THREE.Group();
     this.group.name = "Pacman";
 
-    const bodyGeo = new THREE.SphereGeometry(0.42, 32, 24);
+    // Bright YELLOW body — classic & distinct from any ghost color.
     this.bodyMat = new THREE.MeshStandardMaterial({
-      color: 0xF7A325,
-      emissive: 0xF7A325,
-      emissiveIntensity: 1.6,
-      metalness: 0.3,
-      roughness: 0.25,
+      color: 0xFFE24A,
+      emissive: 0xFFC000,
+      emissiveIntensity: 1.8,
+      metalness: 0.25,
+      roughness: 0.2,
     });
-    this.body = new THREE.Mesh(bodyGeo, this.bodyMat);
+
+    // Pre-cache 8 mouth-open geometries for chomp animation (no alloc/frame).
+    this._mouthGeos = [];
+    const STEPS = 8;
+    const MAX_ANGLE = 1.1; // radians
+    for (let i = 0; i < STEPS; i++) {
+      const a = (i / (STEPS - 1)) * MAX_ANGLE;
+      this._mouthGeos.push(new THREE.SphereGeometry(
+        0.48, 32, 24,
+        a / 2,              // phiStart
+        Math.PI * 2 - a     // phiLength (wedge removed)
+      ));
+    }
+
+    this.body = new THREE.Mesh(this._mouthGeos[0], this.bodyMat);
+    // The phi gap spans the +Z direction by default → rotate so it faces +X (forward).
+    this.body.rotation.y = -Math.PI / 2;
     this.group.add(this.body);
 
-    this.glow = new THREE.PointLight(0xF7A325, 2.8, 7, 2);
-    this.group.add(this.glow);
+    // Small eye on top of the head — helps readability from above.
+    const eyeGeo = new THREE.SphereGeometry(0.07, 14, 14);
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x1a0f00 });
+    this.eye = new THREE.Mesh(eyeGeo, eyeMat);
+    this.eye.position.set(0.12, 0.38, 0);
+    this.group.add(this.eye);
 
-    const trailGeo = new THREE.ConeGeometry(0.18, 0.55, 12);
-    const trailMat = new THREE.MeshBasicMaterial({
-      color: 0xF7A325, transparent: true, opacity: 0.3,
+    // Yellow Tron lightdisc at the feet — huge contrast vs the cyan floor.
+    const discGeo = new THREE.RingGeometry(0.5, 0.72, 48);
+    const discMat = new THREE.MeshBasicMaterial({
+      color: 0xFFE24A,
+      transparent: true,
+      opacity: 0.7,
+      side: THREE.DoubleSide,
     });
-    this.trail = new THREE.Mesh(trailGeo, trailMat);
-    this.trail.rotation.z = Math.PI / 2;
-    this.trail.position.x = -0.55;
-    this.group.add(this.trail);
+    this.disc = new THREE.Mesh(discGeo, discMat);
+    this.disc.rotation.x = -Math.PI / 2;
+    this.disc.position.y = -0.48;
+    this.group.add(this.disc);
+
+    this.glow = new THREE.PointLight(0xFFE24A, 3.2, 8, 2);
+    this.group.add(this.glow);
   }
 
   reset() {
@@ -126,14 +153,23 @@ export class Pacman {
     const { x, z } = gridToWorld(wrappedCol, this.row);
     this.group.position.set(x, 0.5, z);
 
+    // Rotate whole group so the mouth (local +X) faces the movement dir.
     const yaw = Math.atan2(-this.dir.y, this.dir.x);
     this.group.rotation.y = yaw;
 
-    const open = (Math.sin(this.mouthPhase) + 1) * 0.5;
-    const chomp = 1 - open * 0.35;
-    this.body.scale.set(1, chomp, 1);
+    // Swap geometry for chomp animation (cached, zero allocation).
+    const open = (Math.sin(this.mouthPhase) + 1) * 0.5; // 0..1
+    const idx = Math.min(
+      this._mouthGeos.length - 1,
+      Math.max(0, Math.floor(open * this._mouthGeos.length))
+    );
+    if (this.body.geometry !== this._mouthGeos[idx]) {
+      this.body.geometry = this._mouthGeos[idx];
+    }
 
-    this.glow.intensity = 2.4 + Math.sin(this.mouthPhase * 3) * 0.35;
+    // Keep lightdisc & eye horizontal regardless of yaw.
+    this.disc.rotation.z = -yaw; // cancel parent yaw so disc stays round (it is already — but future-proof)
+    this.glow.intensity = 2.6 + Math.sin(this.mouthPhase * 3) * 0.4;
   }
 
   get tileCol() { return Math.round(((this.col % COLS) + COLS) % COLS); }
