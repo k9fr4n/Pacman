@@ -1,0 +1,152 @@
+/* =============================================================
+   PAC / GRID — Tron Legacy HUD styling
+   ============================================================= */
+
+:root {
+  --bg: #000308;
+  --cyan: #6FC3DF;
+  --cyan-bright: #ACE5EE;
+  --orange: #F7A325;
+  --white: #e8faff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  color: var(--cyan-bright);
+  font-family: "Eurostile", "Orbitron", "Segoe UI", sans-serif;
+  letter-spacing: 0.18em;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  z-index: 0;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255,255,255,0.015) 0px,
+    rgba(255,255,255,0.015) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  mix-blend-mode: overlay;
+}
+
+#hud {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 10;
+  padding: 18px 28px;
+  pointer-events: none;
+  text-shadow: 0 0 8px var(--cyan), 0 0 16px rgba(111,195,223,0.4);
+}
+.hud-row { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
+.hud-block { min-width: 160px; }
+.hud-block.center { text-align: center; flex: 1; }
+.hud-block.right  { text-align: right; }
+.hud-block .label { font-size: 11px; color: var(--cyan); opacity: 0.7; margin-bottom: 4px; }
+.hud-block .value { font-size: 28px; font-weight: 300; color: var(--cyan-bright); }
+.hud-block .value.subtle { font-size: 14px; opacity: 0.8; letter-spacing: 0.3em; }
+
+#overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(0,20,32,0.6) 0%, rgba(0,3,8,0.95) 70%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+#overlay.visible { opacity: 1; pointer-events: auto; }
+
+.panel {
+  text-align: center;
+  padding: 48px 64px;
+  border: 1px solid rgba(111,195,223,0.35);
+  background: rgba(0, 10, 20, 0.55);
+  box-shadow: 0 0 40px rgba(111,195,223,0.25), inset 0 0 40px rgba(111,195,223,0.08);
+  backdrop-filter: blur(6px);
+}
+.panel h1 {
+  margin: 0 0 8px;
+  font-size: 56px;
+  font-weight: 200;
+  letter-spacing: 0.35em;
+  color: var(--cyan-bright);
+  text-shadow: 0 0 10px var(--cyan), 0 0 30px var(--cyan), 0 0 60px rgba(111,195,223,0.6);
+}
+.panel .tagline {
+  margin: 0 0 28px;
+  color: var(--orange);
+  letter-spacing: 0.4em;
+  text-shadow: 0 0 10px var(--orange), 0 0 20px rgba(247,163,37,0.5);
+}
+.controls { list-style: none; padding: 0; margin: 0 0 32px; font-size: 13px; line-height: 2; opacity: 0.85; }
+.controls kbd {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--cyan);
+  border-radius: 2px;
+  margin: 0 4px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--cyan-bright);
+  background: rgba(111,195,223,0.08);
+}
+#startBtn {
+  font-family: inherit;
+  letter-spacing: 0.4em;
+  font-size: 18px;
+  padding: 14px 42px;
+  background: transparent;
+  color: var(--cyan-bright);
+  border: 1px solid var(--cyan);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-shadow: 0 0 8px var(--cyan);
+  box-shadow: 0 0 20px rgba(111,195,223,0.3), inset 0 0 20px rgba(111,195,223,0.1);
+}
+#startBtn:hover {
+  background: rgba(111,195,223,0.15);
+  box-shadow: 0 0 30px rgba(111,195,223,0.6), inset 0 0 30px rgba(111,195,223,0.2);
+}
+.hint { margin-top: 18px; font-size: 10px; opacity: 0.5; }
+
+#message {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 20;
+  font-size: 48px;
+  font-weight: 200;
+  letter-spacing: 0.3em;
+  color: var(--orange);
+  text-shadow: 0 0 20px var(--orange), 0 0 40px rgba(247,163,37,0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+#message.show { opacity: 1; }
