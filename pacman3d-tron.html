@@ -92,6 +92,10 @@ canvas{display:block}
   text-shadow:0 0 14px #ffd700;pointer-events:none;z-index:15;
   opacity:0;transition:opacity .15s;
 }
+#flash{
+  position:fixed;inset:0;pointer-events:none;z-index:25;
+  background:rgba(0,245,255,.55);opacity:0;transition:opacity .06s;
+}
 </style>
 </head>
 <body>
@@ -118,6 +122,7 @@ canvas{display:block}
   <button class="btn" onclick="startGame()">INSERT COIN</button>
 </div>
 <div id="msg"></div>
+<div id="flash"></div>
 <button id="mute" onclick="toggleMute()">&#9834; ON</button>
 <button id="camBtn" onclick="toggleCamPanel()">&#9654; CAM</button>
 
@@ -801,15 +806,117 @@ function checkGhosts(){
   }
 }
 
+// ── Death animation ──────────────────────────────────────────
+let deathFx=null;  // null when inactive
+
+function flashScreen(){
+  const el=document.getElementById('flash');
+  el.style.opacity='1';
+  setTimeout(()=>el.style.opacity='0',80);
+}
+
+function startDeathAnim(){
+  const px=pacMesh.position.x, pz=pacMesh.position.z;
+
+  // 10 cyan spark particles
+  const sparks=[];
+  for(let i=0;i<10;i++){
+    const a=i/10*Math.PI*2 + (Math.random()-.5)*.5;
+    const spd=2.8+Math.random()*2.2;
+    const mat=new THREE.MeshBasicMaterial({color:0x00f5ff,transparent:true,opacity:1});
+    const m=new THREE.Mesh(new THREE.SphereGeometry(.07,5,4),mat);
+    m.position.set(px,0,pz);
+    m._vx=Math.cos(a)*spd; m._vz=Math.sin(a)*spd;
+    m._vy=1.8+Math.random()*1.8;
+    scene.add(m); sparks.push(m);
+  }
+
+  // Shockwave ring
+  const ring=new THREE.Mesh(
+    new THREE.RingGeometry(.05,.18,40),
+    new THREE.MeshBasicMaterial({color:0x00f5ff,transparent:true,opacity:1,side:THREE.DoubleSide})
+  );
+  ring.rotation.x=-Math.PI/2;
+  ring.position.set(px,.03,pz);
+  scene.add(ring);
+
+  // Second wider ring (white), slightly delayed via offset
+  const ring2=new THREE.Mesh(
+    new THREE.RingGeometry(.05,.12,40),
+    new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.7,side:THREE.DoubleSide})
+  );
+  ring2.rotation.x=-Math.PI/2;
+  ring2.position.set(px,.04,pz);
+  scene.add(ring2);
+
+  deathFx={t:0, dur:2.0, px, pz, sparks, ring, ring2};
+}
+
+function updateDeathAnim(dt){
+  if(!deathFx) return;
+  deathFx.t+=dt;
+  const {t,dur,sparks,ring,ring2}=deathFx;
+  const p=Math.min(t/dur,1);
+
+  // Pac-Man: spin + shrink + turn white (first 0.55 of anim)
+  if(p<0.55){
+    const pp=p/0.55;
+    pacMesh.visible=true;
+    pacMesh.scale.setScalar(Math.max(.001,1-pp));
+    pacMesh.rotation.y+=22*dt;
+    pacMesh.rotation.z=pp*Math.PI*3;
+    pacMat.emissiveIntensity=1.6+pp*6;
+    // Shift colour toward white as it dies
+    const col=new THREE.Color().lerpColors(new THREE.Color(0x00f5ff),new THREE.Color(0xffffff),pp);
+    pacMat.color.copy(col); pacMat.emissive.copy(col);
+  } else {
+    pacMesh.visible=false;
+  }
+
+  // Shockwave ring 1 (cyan)
+  ring.scale.setScalar(1+p*14);
+  ring.material.opacity=Math.max(0,(1-p*1.1));
+
+  // Shockwave ring 2 (white, expands faster)
+  const p2=Math.min(Math.max((p-.06)/.94,0),1);
+  ring2.scale.setScalar(1+p2*20);
+  ring2.material.opacity=Math.max(0,(1-p2*1.3)*.7);
+
+  // Sparks: fly outward + gravity
+  sparks.forEach(s=>{
+    s.position.x+=s._vx*dt;
+    s.position.y+=s._vy*dt; s._vy-=7*dt;
+    s.position.z+=s._vz*dt;
+    s.material.opacity=Math.max(0,1-p*1.4);
+    s.scale.setScalar(Math.max(.001,1-p*.8));
+  });
+
+  if(p>=1){
+    // Cleanup scene objects
+    sparks.forEach(s=>scene.remove(s));
+    scene.remove(ring); scene.remove(ring2);
+    deathFx=null;
+    // Restore Pac-Man mesh state for next round
+    pacMesh.scale.setScalar(1);
+    pacMesh.rotation.z=0;
+    pacMat.emissiveIntensity=1.6;
+    pacMat.color.setHex(0x00f5ff); pacMat.emissive.setHex(0x00f5ff);
+  }
+}
+
 function triggerDeath(){
   if(gameState!=='playing') return;
   gameState='dying';
-  playSound('death');
   lives--;
   updateHUD();
-  pacMat.emissiveIntensity=4;
+  playSound('death');
+  flashScreen();
+  // Freeze ghosts visually (hide them briefly so the focus is on Pac-Man)
+  ghosts.forEach(g=>{ g.mesh.visible=false; g.light.intensity=0; });
+  startDeathAnim();
+
   setTimeout(()=>{
-    pacMat.emissiveIntensity=1.6;
+    ghosts.forEach(g=>{ g.mesh.visible=true; g.light.intensity=.65; });
     if(lives<=0){
       gameState='gameover';
       if(score>hiScore) hiScore=score;
@@ -818,7 +925,7 @@ function triggerDeath(){
       initGhosts(); resetPac();
       gameState='ready'; readyTimer=2;
     }
-  },1800);
+  },2200);
 }
 
 function triggerLevelClear(){
@@ -1069,6 +1176,8 @@ function loop(ts){
     }
     accum-=FIXED;
   }
+  // Death animation runs independently of fixed step (uses raw dt)
+  if(gameState==='dying') updateDeathAnim(rawDt);
   updateCamera(rawDt);
   if(gameState==='playing'||gameState==='ready') updateDynamicFov();
   renderer.render(scene,camera);
