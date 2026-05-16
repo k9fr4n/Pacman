@@ -771,23 +771,44 @@ const camPos=new THREE.Vector3(0,10,8);
 const camLook=new THREE.Vector3();
 let idleAngle=0;
 
+// Smoothed camera direction — separate from gameplay pDir so the
+// camera swings gently instead of snapping when Pac-Man turns.
+// Initialised to "facing left" to match the default first move.
+let camDirX=-1, camDirZ=0;
+
 function updateCamera(dt){
   if(gameState==='idle'){
     idleAngle+=dt*.22;
     camera.position.set(Math.sin(idleAngle)*22,14,Math.cos(idleAngle)*22);
     camera.lookAt(0,0,0); return;
   }
+
   const px=pacMesh.position.x, pz=pacMesh.position.z;
-  let tP,tL;
+  let tP, tL;
+
   if(gameState==='dying'){
-    tP=new THREE.Vector3(px,13,pz+7);
+    // Pull back and rise dramatically
+    tP=new THREE.Vector3(px - camDirX*4, 14, pz - camDirZ*4);
     tL=new THREE.Vector3(px,0,pz);
   } else {
-    tP=new THREE.Vector3(px-pDir.dc*6.5, 5.5, pz-pDir.dr*6.5);
-    tL=new THREE.Vector3(px,.5,pz);
+    // Gently lerp the camera direction toward the current movement direction.
+    // Only update when Pac-Man is actually moving (avoids overhead drift when stopped).
+    if(pDir.dc||pDir.dr){
+      const alpha=Math.min(dt*2.5, 1);   // ~0.5 s to fully swing 90°
+      camDirX+=(pDir.dc-camDirX)*alpha;
+      camDirZ+=(pDir.dr-camDirZ)*alpha;
+      // Keep length ≤ 1 to prevent overshoot
+      const len=Math.sqrt(camDirX*camDirX+camDirZ*camDirZ);
+      if(len>1){ camDirX/=len; camDirZ/=len; }
+    }
+    // Camera sits behind Pac-Man (opposite of travel direction) and slightly above
+    tP=new THREE.Vector3(px - camDirX*6.5, 5.5, pz - camDirZ*6.5);
+    tL=new THREE.Vector3(px, 0.5, pz);
   }
-  camPos.lerp(tP,.1);
-  camLook.lerp(tL,.1);
+
+  // Smooth position follow (separate lerp factors for pos vs look)
+  camPos.lerp(tP, 0.08);
+  camLook.lerp(tL, 0.14);
   camera.position.copy(camPos);
   camera.lookAt(camLook);
 }
@@ -836,27 +857,26 @@ function toggleMute(){
 // ============================================================
 // INPUT  —  camera-relative controls
 // ============================================================
-// Because the camera follows Pac-Man from behind, the screen axes
-// rotate with the camera. We project the pressed key onto the
-// camera's XZ plane and snap to the nearest maze axis so that
-// "Up" always means "forward on screen", "Left" = "left on screen", etc.
+// The camera follows Pac-Man from behind; world axes rotate with it.
+// We project each key onto the camera's XZ forward/right vectors and
+// snap to the nearest maze axis — so the arrows always match the screen.
 const _cf=new THREE.Vector3(), _cr=new THREE.Vector3();
 const _worldUp=new THREE.Vector3(0,1,0);
 
 function camRelDir(fwd, right) {
-  // fwd:   +1 = up/forward key,  -1 = down/backward key
-  // right: +1 = right key,       -1 = left key
+  // fwd:   +1 = up/forward,  -1 = down/backward
+  // right: +1 = right,       -1 = left
   camera.getWorldDirection(_cf);
   _cf.y=0;
-  if(_cf.lengthSq()<.0001) _cf.set(0,0,-1);
+  if(_cf.lengthSq()<.0001) _cf.set(0,0,-1); // fallback when looking straight down
   _cf.normalize();
-  // Camera's right vector in XZ plane
-  _cr.crossVectors(_worldUp,_cf).normalize();
-  const wx=fwd*_cf.x + right*_cr.x;
-  const wz=fwd*_cf.z + right*_cr.z;
-  // Snap to dominant axis
-  if(Math.abs(wx)>=Math.abs(wz)) return {dc:wx>0?1:-1, dr:0};
-  else                            return {dc:0, dr:wz>0?1:-1};
+  // Right vector = cross(forward, worldUp)  [right-hand rule: forward × up = right]
+  _cr.crossVectors(_cf, _worldUp).normalize();
+  const wx = fwd*_cf.x + right*_cr.x;
+  const wz = fwd*_cf.z + right*_cr.z;
+  // Snap to dominant maze axis
+  if(Math.abs(wx) >= Math.abs(wz)) return {dc: wx>0 ? 1 : -1, dr: 0};
+  else                              return {dc: 0, dr: wz>0 ? 1 : -1};
 }
 
 document.addEventListener('keydown',e=>{
