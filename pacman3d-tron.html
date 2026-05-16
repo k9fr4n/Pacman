@@ -41,11 +41,50 @@ canvas{display:block}
   text-shadow:0 0 8px #00f5ff;box-shadow:0 0 14px rgba(0,245,255,.28);transition:all .2s;
 }
 .btn:hover{background:rgba(0,245,255,.13);box-shadow:0 0 28px rgba(0,245,255,.48)}
-#mute{
-  position:fixed;bottom:10px;right:14px;background:transparent;
+#mute,#camBtn{
+  position:fixed;background:transparent;
   border:1px solid rgba(0,245,255,.28);color:rgba(0,245,255,.55);
   font-family:'Courier New',monospace;font-size:11px;padding:5px 9px;
-  cursor:pointer;z-index:10;letter-spacing:2px;
+  cursor:pointer;z-index:10;letter-spacing:2px;transition:all .2s;
+}
+#mute{ bottom:10px;right:14px; }
+#camBtn{ bottom:10px;right:90px; }
+#mute:hover,#camBtn:hover{ color:#00f5ff;border-color:rgba(0,245,255,.7); }
+
+#camPanel{
+  position:fixed;bottom:44px;right:14px;
+  background:rgba(0,5,20,.92);
+  border:1px solid rgba(0,245,255,.4);
+  padding:14px 18px;z-index:11;
+  display:none;flex-direction:column;gap:10px;
+  min-width:220px;
+  box-shadow:0 0 20px rgba(0,245,255,.15);
+}
+#camPanel.open{ display:flex; }
+.sp-title{
+  color:#00f5ff;font-size:11px;letter-spacing:4px;
+  border-bottom:1px solid rgba(0,245,255,.25);padding-bottom:8px;margin-bottom:2px;
+  text-shadow:0 0 8px #00f5ff;
+}
+.sp-row{ display:flex;flex-direction:column;gap:3px; }
+.sp-row label{
+  display:flex;justify-content:space-between;
+  color:rgba(0,245,255,.75);font-size:10px;letter-spacing:2px;
+}
+.sp-row label span{ color:#00f5ff;font-weight:bold; }
+.sp-row input[type=range]{
+  -webkit-appearance:none;appearance:none;
+  width:100%;height:3px;background:rgba(0,245,255,.2);outline:none;cursor:pointer;
+  border-radius:2px;
+}
+.sp-row input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;
+  width:14px;height:14px;border-radius:50%;
+  background:#00f5ff;box-shadow:0 0 6px #00f5ff;cursor:pointer;
+}
+.sp-row input[type=range]::-moz-range-thumb{
+  width:14px;height:14px;border-radius:50%;border:none;
+  background:#00f5ff;box-shadow:0 0 6px #00f5ff;cursor:pointer;
 }
 #msg{
   position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
@@ -80,6 +119,26 @@ canvas{display:block}
 </div>
 <div id="msg"></div>
 <button id="mute" onclick="toggleMute()">&#9834; ON</button>
+<button id="camBtn" onclick="toggleCamPanel()">&#9654; CAM</button>
+
+<div id="camPanel">
+  <div class="sp-title">CAMERA</div>
+  <div class="sp-row">
+    <label>DISTANCE <span id="vDist">4.0</span></label>
+    <input type="range" id="sDist" min="1.5" max="12" step="0.5" value="4"
+           oninput="applyCamSettings()">
+  </div>
+  <div class="sp-row">
+    <label>HEIGHT <span id="vHeight">2.5</span></label>
+    <input type="range" id="sHeight" min="0.5" max="10" step="0.5" value="2.5"
+           oninput="applyCamSettings()">
+  </div>
+  <div class="sp-row">
+    <label>FOV <span id="vFov">80</span>&deg;</label>
+    <input type="range" id="sFov" min="40" max="120" step="5" value="80"
+           oninput="applyCamSettings()">
+  </div>
+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 'use strict';
@@ -181,7 +240,10 @@ const scene=new THREE.Scene();
 scene.background=new THREE.Color(0x000000);
 scene.fog=new THREE.FogExp2(0x000510,0.042);
 
-const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,0.1,130);
+// Camera tuning (configurable via settings panel)
+let camCfg={ dist:4.0, height:2.5, fov:80 };
+
+const camera=new THREE.PerspectiveCamera(camCfg.fov,innerWidth/innerHeight,0.1,130);
 camera.position.set(0,10,8);
 
 scene.add(new THREE.AmbientLight(0xffffff,0.025));
@@ -802,7 +864,7 @@ function updateCamera(dt){
       if(len>1){ camDirX/=len; camDirZ/=len; }
     }
     // Camera sits behind Pac-Man (opposite of travel direction) and slightly above
-    tP=new THREE.Vector3(px - camDirX*6.5, 5.5, pz - camDirZ*6.5);
+    tP=new THREE.Vector3(px - camDirX*camCfg.dist, camCfg.height, pz - camDirZ*camCfg.dist);
     tL=new THREE.Vector3(px, 0.5, pz);
   }
 
@@ -853,6 +915,28 @@ function toggleMute(){
   muted=!muted;
   document.getElementById('mute').textContent=muted?'\u266a OFF':'\u266a ON';
 }
+
+// ── Camera settings panel ──────────────────────────────────
+function toggleCamPanel(){
+  document.getElementById('camPanel').classList.toggle('open');
+}
+function applyCamSettings(){
+  camCfg.dist  =parseFloat(document.getElementById('sDist').value);
+  camCfg.height=parseFloat(document.getElementById('sHeight').value);
+  camCfg.fov   =parseInt(document.getElementById('sFov').value);
+  document.getElementById('vDist').textContent  =camCfg.dist.toFixed(1);
+  document.getElementById('vHeight').textContent=camCfg.height.toFixed(1);
+  document.getElementById('vFov').textContent   =camCfg.fov;
+  camera.fov=camCfg.fov;
+  camera.updateProjectionMatrix();
+}
+// Close panel when clicking outside
+document.addEventListener('click',e=>{
+  const p=document.getElementById('camPanel');
+  const b=document.getElementById('camBtn');
+  if(p.classList.contains('open')&&!p.contains(e.target)&&e.target!==b)
+    p.classList.remove('open');
+});
 
 // ============================================================
 // INPUT  —  camera-relative controls
