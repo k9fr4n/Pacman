@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PAC-MAN 3D — TRON LEGACY</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;overflow:hidden;font-family:'Courier New',monospace}
+canvas{display:block}
+#hud{
+  position:fixed;top:0;left:0;right:0;
+  display:flex;justify-content:space-between;align-items:center;
+  padding:10px 20px;color:#00f5ff;
+  background:rgba(0,0,0,.78);font-size:16px;letter-spacing:2px;
+  border-bottom:1px solid rgba(0,245,255,.22);z-index:10;
+  text-shadow:0 0 8px #00f5ff;pointer-events:none;
+}
+.hud-col{display:flex;flex-direction:column;gap:2px}
+.hud-col.r{align-items:flex-end}
+.hud-lbl{font-size:10px;opacity:.5;letter-spacing:3px}
+.hud-val{font-size:20px;font-weight:bold}
+#lives{display:flex;gap:6px;align-items:center;margin-top:3px}
+.life{width:12px;height:12px;border-radius:50%;background:#00f5ff;box-shadow:0 0 6px #00f5ff}
+#overlay{
+  position:fixed;inset:0;display:flex;flex-direction:column;
+  justify-content:center;align-items:center;
+  background:rgba(0,0,20,.93);color:#00f5ff;z-index:20;text-align:center;gap:10px;
+}
+#overlay h1{
+  font-size:56px;letter-spacing:10px;
+  text-shadow:0 0 20px #00f5ff,0 0 50px rgba(0,245,255,.5);margin-bottom:4px;
+}
+#overlay h2{font-size:22px;letter-spacing:5px;opacity:.75}
+#overlay p{font-size:14px;opacity:.6;letter-spacing:2px}
+.sbig{font-size:36px;color:#ffd700;text-shadow:0 0 14px #ffd700;margin:6px 0}
+.btn{
+  margin-top:16px;padding:12px 44px;background:transparent;
+  border:2px solid #00f5ff;color:#00f5ff;font-family:'Courier New',monospace;
+  font-size:17px;letter-spacing:4px;cursor:pointer;
+  text-shadow:0 0 8px #00f5ff;box-shadow:0 0 14px rgba(0,245,255,.28);transition:all .2s;
+}
+.btn:hover{background:rgba(0,245,255,.13);box-shadow:0 0 28px rgba(0,245,255,.48)}
+#mute{
+  position:fixed;bottom:10px;right:14px;background:transparent;
+  border:1px solid rgba(0,245,255,.28);color:rgba(0,245,255,.55);
+  font-family:'Courier New',monospace;font-size:11px;padding:5px 9px;
+  cursor:pointer;z-index:10;letter-spacing:2px;
+}
+#msg{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  color:#ffd700;font-size:26px;letter-spacing:4px;
+  text-shadow:0 0 14px #ffd700;pointer-events:none;z-index:15;
+  opacity:0;transition:opacity .15s;
+}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div class="hud-col">
+    <div class="hud-lbl">SCORE</div>
+    <div class="hud-val" id="sc">000000</div>
+  </div>
+  <div class="hud-col" style="align-items:center">
+    <div class="hud-lbl" style="text-align:center">LIVES</div>
+    <div id="lives"></div>
+  </div>
+  <div class="hud-col r">
+    <div class="hud-lbl">LEVEL</div>
+    <div class="hud-val" id="lv">1</div>
+    <div class="hud-lbl" style="margin-top:3px">HI-SCORE</div>
+    <div class="hud-val" id="hi">000000</div>
+  </div>
+</div>
+<div id="overlay">
+  <h1>PAC-MAN</h1>
+  <h2>TRON&nbsp;&nbsp;LEGACY</h2>
+  <p style="margin-top:6px">WASD or ARROW KEYS&nbsp;&nbsp;|&nbsp;&nbsp;M = mute</p>
+  <button class="btn" onclick="startGame()">INSERT COIN</button>
+</div>
+<div id="msg"></div>
+<button id="mute" onclick="toggleMute()">&#9834; ON</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+// ============================================================
+// 1.  CONSTANTS & MAZE DATA
+// ============================================================
+const COLS=28, ROWS=31;
+const T_WALL=0, T_DOT=1, T_POWER=2, T_EMPTY=3, T_DOOR=4, T_HOUSE=5;
+
+// Classic 28x31 Pac-Man maze
+// # wall  . dot  * power  ' ' empty  - door  G ghost-house
+const RAW=[
+  "############################",   // 0
+  "#............##............#",   // 1
+  "#.####.#####.##.#####.####.#",   // 2
+  "#*####.#####.##.#####.####*#",   // 3
+  "#.####.#####.##.#####.####.#",   // 4
+  "#..........................#",   // 5
+  "#.####.##.########.##.####.#",   // 6
+  "#.####.##.########.##.####.#",   // 7
+  "#......##....##....##......#",   // 8
+  "######.#####.##.#####.######",   // 9
+  "      .#####.##.#####.      ",   // 10 tunnel row
+  "######.##..........##.######",   // 11
+  "      .##.########.##.      ",   // 12
+  "      .##.##----##.##.      ",   // 13 ghost door
+  "######.##.##GGGG##.##.######",   // 14
+  "T     .   ##GGGG##   .     T",   // 15 tunnel row
+  "######.##.##GGGG##.##.######",   // 16
+  "      .##..........##.      ",   // 17
+  "######.##.########.##.######",   // 18
+  "######.##.########.##.######",   // 19
+  "#............##............#",   // 20
+  "#.####.#####.##.#####.####.#",   // 21
+  "#*..##................##..*#",   // 22
+  "###.##.##.########.##.##.###",   // 23
+  "###.##.##.########.##.##.###",   // 24
+  "#......##....##....##......#",   // 25
+  "#.##########.##.##########.#",   // 26
+  "#.##########.##.##########.#",   // 27
+  "#..........................#",   // 28
+  "############################",   // 29
+  "############################",   // 30
+];
+
+// Parse into tile array
+let baseMaze=[], maze=[];
+function parseMaze(){
+  baseMaze=[];
+  for(let r=0;r<ROWS;r++){
+    baseMaze[r]=[];
+    const row=RAW[r]||'';
+    for(let c=0;c<COLS;c++){
+      const ch=row[c]||' ';
+      if(ch==='#') baseMaze[r][c]=T_WALL;
+      else if(ch==='.') baseMaze[r][c]=T_DOT;
+      else if(ch==='*') baseMaze[r][c]=T_POWER;
+      else if(ch==='-') baseMaze[r][c]=T_DOOR;
+      else if(ch==='G') baseMaze[r][c]=T_HOUSE;
+      else baseMaze[r][c]=T_EMPTY;
+    }
+  }
+}
+parseMaze();
+function resetMaze(){ maze=baseMaze.map(r=>[...r]); }
+resetMaze();
+
+// Tile <-> World   (maze centered at origin, tiles are 1 world-unit)
+const OX=(COLS-1)/2, OZ=(ROWS-1)/2;
+function tw(col,row){ return {x:col-OX, z:row-OZ}; }
+
+// Key positions
+const PAC_SPAWN     ={col:13,row:22};   // center bottom open corridor
+const GHOST_ABOVE   ={col:13,row:11};   // above ghost house
+const GHOST_CENTER  ={col:13,row:15};   // house center
+const GHOST_SPAWNS  ={
+  blinky:{col:13,row:11},
+  pinky: {col:13,row:15},
+  inky:  {col:12,row:15},
+  clyde: {col:14,row:15},
+};
+const SCATTER_TARGETS={
+  blinky:{col:25,row:0},
+  pinky: {col:2, row:0},
+  inky:  {col:27,row:30},
+  clyde: {col:0, row:30},
+};
+const FRUIT_TILE={col:13,row:17};
+
+// ============================================================
+// 2.  SCENE SETUP
+// ============================================================
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x000000);
+scene.fog=new THREE.FogExp2(0x000510,0.042);
+
+const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,0.1,130);
+camera.position.set(0,10,8);
+
+scene.add(new THREE.AmbientLight(0xffffff,0.025));
+scene.add(new THREE.HemisphereLight(0x001428,0x000000,0.07));
+const pacLight=new THREE.PointLight(0x00f5ff,1.8,10);
+scene.add(pacLight);
+
+window.addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+// ============================================================
+// 3.  MAZE BUILDER
+// ============================================================
+const mazeGroup=new THREE.Group();
+scene.add(mazeGroup);
+
+const WALL_H=0.9;
+const wallGeo   =new THREE.BoxGeometry(1,WALL_H,1);
+const wallEdgeGeo=new THREE.EdgesGeometry(wallGeo);
+const wallMat   =new THREE.MeshStandardMaterial({color:0x001428,roughness:.88,metalness:.12});
+const edgeMat   =new THREE.LineBasicMaterial({color:0x00f5ff});
+
+// Floor plane
+const floorMesh=(()=>{
+  const m=new THREE.Mesh(
+    new THREE.PlaneGeometry(COLS,ROWS),
+    new THREE.MeshBasicMaterial({color:0x000814})
+  );
+  m.rotation.x=-Math.PI/2;
+  m.position.y=-WALL_H/2-.01;
+  return m;
+})();
+
+function makeGrid(){
+  const pts=[];
+  const y=-WALL_H/2-.004;
+  for(let c=0;c<=COLS;c++){
+    const x=c-OX-.5;
+    pts.push(x,y,-OZ-.5, x,y,OZ+.5);
+  }
+  for(let r=0;r<=ROWS;r++){
+    const z=r-OZ-.5;
+    pts.push(-OX-.5,y,z, OX+.5,y,z);
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));
+  return new THREE.LineSegments(geo,
+    new THREE.LineBasicMaterial({color:0x00f5ff,transparent:true,opacity:.06}));
+}
+
+function buildMaze(){
+  while(mazeGroup.children.length) mazeGroup.remove(mazeGroup.children[0]);
+  mazeGroup.add(floorMesh);
+  mazeGroup.add(makeGrid());
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      if(maze[r][c]===T_WALL){
+        const {x,z}=tw(c,r);
+        const wm=new THREE.Mesh(wallGeo,wallMat);
+        wm.position.set(x,0,z);
+        mazeGroup.add(wm);
+        const we=new THREE.LineSegments(wallEdgeGeo,edgeMat);
+        we.position.set(x,0,z);
+        mazeGroup.add(we);
+      }
+    }
+  }
+}
+buildMaze();
+
+// ============================================================
+// 4.  PELLETS & FRUIT
+// ============================================================
+const pelletGroup=new THREE.Group();
+scene.add(pelletGroup);
+
+const dotMat =new THREE.MeshStandardMaterial({color:0x00f5ff,emissive:0x00f5ff,emissiveIntensity:1.2});
+const pwrMat =new THREE.MeshStandardMaterial({color:0xffffff,emissive:0xffffff,emissiveIntensity:1.9});
+const dotGeo =new THREE.SphereGeometry(.08,7,5);
+const pwrGeo =new THREE.SphereGeometry(.22,10,8);
+const fruitGeo=new THREE.IcosahedronGeometry(.28,0);
+const fruitMat=new THREE.MeshStandardMaterial({color:0xffd700,emissive:0xffd700,emissiveIntensity:1.5});
+
+let dotMeshes=new Map(), pwrMeshes=new Map();
+let totalDots=0, dotsEaten=0;
+let fruitMesh=null, fruitTimer=0, fruitStage=0;
+const FRUIT_PTS=[100,300,500,700,1000];
+
+function buildPellets(){
+  while(pelletGroup.children.length) pelletGroup.remove(pelletGroup.children[0]);
+  dotMeshes.clear(); pwrMeshes.clear();
+  totalDots=0; dotsEaten=0;
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const t=maze[r][c];
+      if(t===T_DOT||t===T_POWER){
+        const {x,z}=tw(c,r);
+        const geo=t===T_DOT?dotGeo:pwrGeo;
+        const mat=t===T_DOT?dotMat:pwrMat;
+        const m=new THREE.Mesh(geo,mat);
+        m.position.set(x,0,z);
+        pelletGroup.add(m);
+        if(t===T_DOT) dotMeshes.set(`${r},${c}`,m);
+        else           pwrMeshes.set(`${r},${c}`,m);
+        totalDots++;
+      }
+    }
+  }
+}
+buildPellets();
+
+function spawnFruit(){
+  if(fruitMesh) return;
+  fruitMesh=new THREE.Mesh(fruitGeo,fruitMat);
+  const {x,z}=tw(FRUIT_TILE.col,FRUIT_TILE.row);
+  fruitMesh.position.set(x,0,z);
+  scene.add(fruitMesh);
+  fruitTimer=10;
+}
+function removeFruit(){
+  if(fruitMesh){scene.remove(fruitMesh);fruitMesh=null;fruitTimer=0;}
+}
+
+// ============================================================
+// 5.  PAC-MAN
+// ============================================================
+const pacMat=new THREE.MeshStandardMaterial({
+  color:0x00f5ff,emissive:0x00f5ff,emissiveIntensity:1.6,roughness:.2,metalness:.4
+});
+const pacMesh=new THREE.Mesh(new THREE.SphereGeometry(.38,22,14),pacMat);
+scene.add(pacMesh);
+
+let pTile   ={col:PAC_SPAWN.col,row:PAC_SPAWN.row};
+let pTarget ={col:PAC_SPAWN.col,row:PAC_SPAWN.row};
+let pProg   =1;
+let pDir    ={dc:0,dr:0};
+let pNextDir={dc:-1,dr:0};
+const PAC_SPD=6.5;
+
+function canMove(col,row,dc,dr){
+  const nc=((col+dc)%COLS+COLS)%COLS;
+  const nr=row+dr;
+  if(nr<0||nr>=ROWS) return false;
+  const t=maze[nr][nc];
+  return t!==T_WALL && t!==T_DOOR;
+}
+
+function resetPac(){
+  pTile   ={col:PAC_SPAWN.col,row:PAC_SPAWN.row};
+  pTarget ={col:PAC_SPAWN.col,row:PAC_SPAWN.row};
+  pProg=1; pDir={dc:0,dr:0}; pNextDir={dc:-1,dr:0};
+  const {x,z}=tw(PAC_SPAWN.col,PAC_SPAWN.row);
+  pacMesh.position.set(x,0,z);
+  pacLight.position.set(x,1.2,z);
+}
+
+function updatePac(dt){
+  const spd=PAC_SPD*lvlSpeed;
+  if(pProg>=1){
+    pTile={...pTarget};
+    if(pTile.col<0) pTile.col=COLS-1;
+    if(pTile.col>=COLS) pTile.col=0;
+    // Try buffered direction
+    if((pNextDir.dc||pNextDir.dr) && canMove(pTile.col,pTile.row,pNextDir.dc,pNextDir.dr))
+      pDir={...pNextDir};
+    // Advance
+    if((pDir.dc||pDir.dr) && canMove(pTile.col,pTile.row,pDir.dc,pDir.dr)){
+      pTarget={col:((pTile.col+pDir.dc)%COLS+COLS)%COLS,row:pTile.row+pDir.dr};
+      pProg=0;
+    } else {
+      pDir={dc:0,dr:0};
+    }
+  } else {
+    pProg=Math.min(pProg+spd*dt,1);
+  }
+  // Interpolate with tunnel wrap correction
+  const src=tw(pTile.col,pTile.row);
+  const dst=tw(pTarget.col,pTarget.row);
+  let dx=dst.x-src.x, dz=dst.z-src.z;
+  if(Math.abs(dx)>COLS/2) dx=dx>0?dx-COLS:dx+COLS;
+  pacMesh.position.set(src.x+dx*pProg,0,src.z+dz*pProg);
+  pacMesh.rotation.y+=3.5*dt;
+  pacLight.position.set(pacMesh.position.x,1.2,pacMesh.position.z);
+}
+
+// ============================================================
+// 6.  GHOSTS
+// ============================================================
+const GHOST_HEX={blinky:0xff2050,pinky:0xff6af0,inky:0x00c8ff,clyde:0xffaa00};
+const MODE_CYCLE=[7,20,7,20,5,20,5,1e9];
+const GHOST_SPD=5.2, FRIGHT_SPD=2.8, EYES_SPD=10;
+const RELEASE_AT={blinky:0,pinky:0,inky:30,clyde:60};
+
+class Ghost{
+  constructor(name){
+    this.name=name;
+    this.hexCol=GHOST_HEX[name];
+    const sp=GHOST_SPAWNS[name];
+    this.tile   ={col:sp.col,row:sp.row};
+    this.target ={col:sp.col,row:sp.row};
+    this.prog   =1;
+    this.dir    ={dc:0,dr:0};
+    // Blinky starts outside; others bounce in the ghost house
+    this.mode   =(name==='blinky')?'scatter':'house';
+    this.inHouse=(name!=='blinky');
+    this.frighTimer=0;
+    this.modeIdx=0;
+    this.modeTimer=MODE_CYCLE[0];
+    this.releaseAt=RELEASE_AT[name];
+    this._savedMode='scatter';
+    this._buildMesh();
+  }
+
+  _buildMesh(){
+    const hex=this.hexCol;
+    this.mat=new THREE.MeshStandardMaterial({
+      color:hex,emissive:hex,emissiveIntensity:1.3,
+      transparent:true,opacity:.92,roughness:.35
+    });
+    this.mesh=new THREE.Group();
+    // Body
+    const body=new THREE.Mesh(new THREE.CylinderGeometry(.28,.32,.55,10),this.mat);
+    body.position.y=.28;
+    // Cap
+    const cap=new THREE.Mesh(new THREE.SphereGeometry(.28,10,8),this.mat);
+    cap.position.y=.55;
+    this.mesh.add(body,cap);
+    // Skirt bumps
+    for(let i=0;i<5;i++){
+      const a=i/5*Math.PI*2;
+      const b=new THREE.Mesh(new THREE.SphereGeometry(.13,6,5),this.mat);
+      b.position.set(Math.cos(a)*.22,.04,Math.sin(a)*.22);
+      this.mesh.add(b);
+    }
+    // Eyes
+    const eMat=new THREE.MeshBasicMaterial({color:0xffffff});
+    const pMat=new THREE.MeshBasicMaterial({color:0x0000cc});
+    const eG=new THREE.SphereGeometry(.07,8,8);
+    const pG=new THREE.SphereGeometry(.035,6,6);
+    this.eyeGroup=new THREE.Group();
+    [-1,1].forEach(s=>{
+      const e=new THREE.Mesh(eG,eMat); e.position.set(s*.11,.55,.24);
+      const p=new THREE.Mesh(pG,pMat); p.position.set(s*.11,.55,.3);
+      this.eyeGroup.add(e,p);
+    });
+    this.mesh.add(this.eyeGroup);
+    scene.add(this.mesh);
+    this.light=new THREE.PointLight(hex,.65,5);
+    scene.add(this.light);
+    this._syncMesh();
+  }
+
+  _syncMesh(){
+    const {x,z}=tw(this.tile.col,this.tile.row);
+    this.mesh.position.set(x,0,z);
+    this.light.position.set(x,1,z);
+  }
+
+  remove(){
+    scene.remove(this.mesh);
+    scene.remove(this.light);
+  }
+
+  setFrightened(){
+    if(this.inHouse||this.mode==='eyes') return;
+    if(this.mode!=='frightened') this._savedMode=this.mode;
+    this.mode='frightened';
+    this.frighTimer=7;
+    this.mat.color.setHex(0x1a1aff);
+    this.mat.emissive.setHex(0x1a1aff);
+    this.light.color.setHex(0x1a1aff);
+    // Reverse direction (if not stationary)
+    if(this.dir.dc||this.dir.dr)
+      this.dir={dc:-this.dir.dc,dr:-this.dir.dr};
+  }
+
+  setEyes(){
+    this.mode='eyes';
+    this.mat.opacity=.3;
+    this.mat.color.setHex(0x88aaff);
+    this.mat.emissive.setHex(0x88aaff);
+    this.light.intensity=.12;
+  }
+
+  restoreColor(){
+    this.mat.color.setHex(this.hexCol);
+    this.mat.emissive.setHex(this.hexCol);
+    this.mat.opacity=.92;
+    this.light.color.setHex(this.hexCol);
+    this.light.intensity=.65;
+  }
+
+  canEnter(col,row){
+    const c=((col%COLS)+COLS)%COLS;
+    if(row<0||row>=ROWS) return false;
+    const t=maze[row][c];
+    if(t===T_WALL) return false;
+    // Only eyes-mode can enter door/house from outside
+    if(t===T_DOOR&&this.mode!=='eyes') return false;
+    if(t===T_HOUSE&&this.mode!=='eyes'&&!this.inHouse) return false;
+    return true;
+  }
+
+  _getTarget(blinkyTile){
+    if(this.mode==='eyes') return GHOST_ABOVE;
+    if(this.mode==='scatter') return SCATTER_TARGETS[this.name];
+    switch(this.name){
+      case 'blinky': return {col:pTile.col,row:pTile.row};
+      case 'pinky' : return {
+        col:Math.max(0,Math.min(COLS-1,pTile.col+pDir.dc*4)),
+        row:Math.max(0,Math.min(ROWS-1,pTile.row+pDir.dr*4))
+      };
+      case 'inky'  :{
+        const px=pTile.col+pDir.dc*2, pz=pTile.row+pDir.dr*2;
+        return {
+          col:Math.max(0,Math.min(COLS-1,2*px-blinkyTile.col)),
+          row:Math.max(0,Math.min(ROWS-1,2*pz-blinkyTile.row))
+        };
+      }
+      case 'clyde' :{
+        const d=Math.abs(this.tile.col-pTile.col)+Math.abs(this.tile.row-pTile.row);
+        return d>8?{col:pTile.col,row:pTile.row}:SCATTER_TARGETS.clyde;
+      }
+    }
+    return {col:pTile.col,row:pTile.row};
+  }
+
+  _chooseDir(tgt){
+    const dirs=[{dc:0,dr:-1},{dc:0,dr:1},{dc:-1,dr:0},{dc:1,dr:0}];
+    const rev={dc:-this.dir.dc,dr:-this.dir.dr};
+    let best=null, bestD=1e9;
+    for(const d of dirs){
+      if(d.dc===rev.dc&&d.dr===rev.dr&&this.mode!=='frightened'&&this.mode!=='eyes') continue;
+      const nc=this.tile.col+d.dc, nr=this.tile.row+d.dr;
+      if(!this.canEnter(nc,nr)) continue;
+      if(this.mode==='frightened'){
+        if(!best||Math.random()<.45) best=d;
+        continue;
+      }
+      const dist=(nc-tgt.col)**2+(nr-tgt.row)**2;
+      if(dist<bestD){bestD=dist;best=d;}
+    }
+    if(!best) best={dc:-this.dir.dc,dr:-this.dir.dr};
+    return best;
+  }
+
+  update(dt,blinkyTile){
+    if(gameState!=='playing') return;
+
+    // House bounce animation
+    if(this.inHouse){
+      const {x,z}=tw(this.tile.col,this.tile.row);
+      this.mesh.position.set(x,Math.sin(Date.now()*.004)*.18,z);
+      this.light.position.set(x,1,z);
+      return;
+    }
+
+    // Frightened countdown
+    if(this.mode==='frightened'){
+      this.frighTimer-=dt;
+      if(this.frighTimer<2){
+        this.mat.color.setHex(Math.floor(Date.now()/180)%2===0?0xffffff:0x1a1aff);
+      }
+      if(this.frighTimer<=0){
+        this.mode=this._savedMode||'scatter';
+        this.restoreColor();
+      }
+    }
+
+    // Scatter/chase mode cycling
+    if(this.mode==='scatter'||this.mode==='chase'){
+      this.modeTimer-=dt;
+      if(this.modeTimer<=0){
+        this.modeIdx=Math.min(this.modeIdx+1,MODE_CYCLE.length-1);
+        this.modeTimer=MODE_CYCLE[this.modeIdx];
+        const nm=this.modeIdx%2===0?'scatter':'chase';
+        if(nm!==this.mode){
+          this.dir={dc:-this.dir.dc,dr:-this.dir.dr};
+          this.mode=nm;
+        }
+      }
+    }
+
+    // Eyes: check arrival back at house
+    if(this.mode==='eyes'&&this.tile.col===GHOST_ABOVE.col&&this.tile.row===GHOST_ABOVE.row&&this.prog>=1){
+      this.inHouse=true;
+      this.mode='scatter';
+      this.tile={...GHOST_CENTER};
+      this.target={...GHOST_CENTER};
+      this.prog=1;
+      const {x,z}=tw(GHOST_CENTER.col,GHOST_CENTER.row);
+      this.mesh.position.set(x,0,z);
+      this.light.position.set(x,1,z);
+      this.restoreColor();
+      setTimeout(()=>{
+        this.inHouse=false;
+        this.tile={...GHOST_ABOVE};
+        this.target={...GHOST_ABOVE};
+        this.prog=1;
+      },3000);
+      return;
+    }
+
+    const spd=this.mode==='frightened'?FRIGHT_SPD:this.mode==='eyes'?EYES_SPD:GHOST_SPD*lvlSpeed;
+    const tgt=this._getTarget(blinkyTile);
+
+    if(this.prog>=1){
+      this.tile={...this.target};
+      if(this.tile.col<0) this.tile.col=COLS-1;
+      if(this.tile.col>=COLS) this.tile.col=0;
+      const d=this._chooseDir(tgt);
+      this.dir=d;
+      this.target={
+        col:((this.tile.col+d.dc)%COLS+COLS)%COLS,
+        row:this.tile.row+d.dr
+      };
+      this.prog=0;
+      // Orient mesh to direction
+      if(d.dc||d.dr) this.mesh.rotation.y=Math.atan2(d.dc,d.dr);
+    } else {
+      this.prog=Math.min(this.prog+spd*dt,1);
+    }
+
+    // Interpolate position
+    const src=tw(this.tile.col,this.tile.row);
+    const dst=tw(this.target.col,this.target.row);
+    let dx=dst.x-src.x, dz=dst.z-src.z;
+    if(Math.abs(dx)>COLS/2) dx=dx>0?dx-COLS:dx+COLS;
+    const wx=src.x+dx*this.prog;
+    const wz=src.z+dz*this.prog;
+    this.mesh.position.set(wx,0,wz);
+    this.light.position.set(wx,1,wz);
+  }
+}
+
+let ghosts=[];
+function initGhosts(){
+  ghosts.forEach(g=>g.remove());
+  ghosts=['blinky','pinky','inky','clyde'].map(n=>new Ghost(n));
+}
+
+// ============================================================
+// 7.  GAME STATE & SCORING
+// ============================================================
+let score=0,hiScore=0,lives=3,level=1,lvlSpeed=1;
+let ghostCombo=0;
+let gameState='idle';
+let readyTimer=0;
+const GHOST_PTS=[200,400,800,1600];
+
+function addScore(n){
+  score+=n;
+  if(score>hiScore) hiScore=score;
+  if(score>=10000&&lives<5) lives++;  // extra life at 10k
+  updateHUD();
+}
+
+function showMsg(txt,dur){
+  dur=dur||1.2;
+  const el=document.getElementById('msg');
+  el.textContent=txt;el.style.opacity='1';
+  clearTimeout(el._t);
+  el._t=setTimeout(()=>el.style.opacity='0',dur*1000);
+}
+
+function updateHUD(){
+  document.getElementById('sc').textContent=String(score).padStart(6,'0');
+  document.getElementById('lv').textContent=level;
+  document.getElementById('hi').textContent=String(hiScore).padStart(6,'0');
+  const lv=document.getElementById('lives');
+  lv.innerHTML='';
+  for(let i=0;i<lives;i++){
+    const d=document.createElement('div');d.className='life';lv.appendChild(d);
+  }
+}
+
+// ============================================================
+// 8.  COLLISION & EATING
+// ============================================================
+function checkPellets(){
+  const key=`${pTile.row},${pTile.col}`;
+  if(dotMeshes.has(key)){
+    pelletGroup.remove(dotMeshes.get(key));
+    dotMeshes.delete(key);
+    maze[pTile.row][pTile.col]=T_EMPTY;
+    addScore(10); dotsEaten++;
+    playWaka();
+    checkRelease();
+    if(dotsEaten===70||dotsEaten===170) spawnFruit();
+    if(dotMeshes.size===0&&pwrMeshes.size===0) triggerLevelClear();
+  } else if(pwrMeshes.has(key)){
+    pelletGroup.remove(pwrMeshes.get(key));
+    pwrMeshes.delete(key);
+    maze[pTile.row][pTile.col]=T_EMPTY;
+    addScore(50); dotsEaten++;
+    ghostCombo=0;
+    ghosts.forEach(g=>{if(!g.inHouse) g.setFrightened();});
+    playSound('power');
+    checkRelease();
+    if(dotMeshes.size===0&&pwrMeshes.size===0) triggerLevelClear();
+  }
+  // Fruit
+  if(fruitMesh&&pTile.col===FRUIT_TILE.col&&pTile.row===FRUIT_TILE.row){
+    const pts=FRUIT_PTS[Math.min(fruitStage,FRUIT_PTS.length-1)];
+    fruitStage++; addScore(pts);
+    showMsg('+'+pts); playSound('fruit'); removeFruit();
+  }
+}
+
+function checkRelease(){
+  ghosts.forEach(g=>{
+    if(g.inHouse&&dotsEaten>=g.releaseAt){
+      g.inHouse=false;
+      g.mode='scatter';
+      // Teleport to corridor above house
+      g.tile  ={...GHOST_ABOVE};
+      g.target={...GHOST_ABOVE};
+      g.prog=1;
+      g.restoreColor();
+      const {x,z}=tw(GHOST_ABOVE.col,GHOST_ABOVE.row);
+      g.mesh.position.set(x,0,z);
+      g.light.position.set(x,1,z);
+    }
+  });
+}
+
+function checkGhosts(){
+  for(const g of ghosts){
+    if(g.inHouse) continue;
+    const dx=Math.abs(pacMesh.position.x-g.mesh.position.x);
+    const dz=Math.abs(pacMesh.position.z-g.mesh.position.z);
+    if(dx<.7&&dz<.7){
+      if(g.mode==='frightened'){
+        g.setEyes();
+        ghostCombo=Math.min(ghostCombo+1,4);
+        const pts=GHOST_PTS[ghostCombo-1];
+        addScore(pts); showMsg('+'+pts); playSound('ghostEat');
+      } else if(g.mode!=='eyes'){
+        triggerDeath(); return;
+      }
+    }
+  }
+}
+
+function triggerDeath(){
+  if(gameState!=='playing') return;
+  gameState='dying';
+  playSound('death');
+  lives--;
+  updateHUD();
+  pacMat.emissiveIntensity=4;
+  setTimeout(()=>{
+    pacMat.emissiveIntensity=1.6;
+    if(lives<=0){
+      gameState='gameover';
+      if(score>hiScore) hiScore=score;
+      showOverlay('GAME OVER','SCORE: '+String(score).padStart(6,'0'),true);
+    } else {
+      initGhosts(); resetPac();
+      gameState='ready'; readyTimer=2;
+    }
+  },1800);
+}
+
+function triggerLevelClear(){
+  if(gameState!=='playing') return;
+  gameState='levelclear';
+  playSound('win');
+  showMsg('LEVEL '+level+' CLEAR!',2.5);
+  removeFruit();
+  setTimeout(()=>{
+    level++;
+    lvlSpeed=Math.min(1+(level-1)*.08,1.85);
+    resetMaze(); buildMaze(); buildPellets();
+    fruitStage=0; initGhosts(); resetPac();
+    gameState='ready'; readyTimer=2;
+  },3000);
+}
+
+// ============================================================
+// 9.  CAMERA
+// ============================================================
+const camPos=new THREE.Vector3(0,10,8);
+const camLook=new THREE.Vector3();
+let idleAngle=0;
+
+function updateCamera(dt){
+  if(gameState==='idle'){
+    idleAngle+=dt*.22;
+    camera.position.set(Math.sin(idleAngle)*22,14,Math.cos(idleAngle)*22);
+    camera.lookAt(0,0,0); return;
+  }
+  const px=pacMesh.position.x, pz=pacMesh.position.z;
+  let tP,tL;
+  if(gameState==='dying'){
+    tP=new THREE.Vector3(px,13,pz+7);
+    tL=new THREE.Vector3(px,0,pz);
+  } else {
+    tP=new THREE.Vector3(px-pDir.dc*6.5, 5.5, pz-pDir.dr*6.5);
+    tL=new THREE.Vector3(px,.5,pz);
+  }
+  camPos.lerp(tP,.1);
+  camLook.lerp(tL,.1);
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+}
+
+// ============================================================
+// 10. AUDIO ENGINE
+// ============================================================
+let actx=null, muted=false, wakaFlip=false;
+function ensureAudio(){
+  if(!actx) actx=new(window.AudioContext||window.webkitAudioContext)();
+  if(actx.state==='suspended') actx.resume();
+}
+function tone(freq,type,dur,t0,vol,endFreq){
+  if(muted||!actx) return;
+  const o=actx.createOscillator(), g=actx.createGain();
+  o.connect(g); g.connect(actx.destination);
+  o.type=type;
+  o.frequency.setValueAtTime(freq,t0);
+  if(endFreq) o.frequency.linearRampToValueAtTime(endFreq,t0+dur);
+  g.gain.setValueAtTime(vol,t0);
+  g.gain.exponentialRampToValueAtTime(.0001,t0+dur);
+  o.start(t0); o.stop(t0+dur+.01);
+}
+function playWaka(){
+  ensureAudio(); if(muted) return;
+  tone(wakaFlip?280:220,'square',.07,actx.currentTime,.16);
+  wakaFlip=!wakaFlip;
+}
+function playSound(name){
+  ensureAudio(); if(muted) return;
+  const t=actx.currentTime;
+  switch(name){
+    case 'power':    tone(400,'sine',.3,t,.35,800); break;
+    case 'ghostEat': [800,600,400,200].forEach((f,i)=>tone(f,'square',.055,t+i*.065,.22)); break;
+    case 'death':    [523,494,466,440,415,392,370,349,330,311,294,262].forEach((f,i)=>tone(f,'sawtooth',.11,t+i*.1,.25)); break;
+    case 'start':    [330,392,523,659].forEach((f,i)=>tone(f,'sine',.16,t+i*.19,.32)); break;
+    case 'fruit':    tone(880,'sine',.09,t,.4); tone(1100,'sine',.09,t+.12,.35); break;
+    case 'win':      [523,659,784,1047].forEach((f,i)=>tone(f,'sine',.22,t+i*.16,.4)); break;
+  }
+}
+function toggleMute(){
+  muted=!muted;
+  document.getElementById('mute').textContent=muted?'\u266a OFF':'\u266a ON';
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+const KEYMAP={
+  ArrowUp:{dc:0,dr:-1},ArrowDown:{dc:0,dr:1},
+  ArrowLeft:{dc:-1,dr:0},ArrowRight:{dc:1,dr:0},
+  w:{dc:0,dr:-1},s:{dc:0,dr:1},a:{dc:-1,dr:0},d:{dc:1,dr:0},
+};
+document.addEventListener('keydown',e=>{
+  if(e.key==='m'||e.key==='M'){toggleMute();return;}
+  const d=KEYMAP[e.key];
+  if(d&&(gameState==='playing'||gameState==='ready')){
+    pNextDir=d; ensureAudio(); e.preventDefault();
+  }
+});
+
+// ============================================================
+// OVERLAY HELPERS
+// ============================================================
+function showOverlay(title,sub,restart){
+  const ov=document.getElementById('overlay');
+  ov.innerHTML=`
+    <h1>${title}</h1>
+    ${sub?`<div class="sbig">${sub}</div>`:''}
+    <p style="margin-top:4px">HI-SCORE: ${String(hiScore).padStart(6,'0')}</p>
+    ${restart?'<button class="btn" onclick="startGame()">PLAY AGAIN</button>':''}
+  `;
+  ov.style.display='flex';
+}
+function hideOverlay(){ document.getElementById('overlay').style.display='none'; }
+
+function startGame(){
+  ensureAudio();
+  hideOverlay();
+  score=0; lives=3; level=1; lvlSpeed=1; fruitStage=0; ghostCombo=0;
+  resetMaze(); buildMaze(); buildPellets();
+  initGhosts(); resetPac(); removeFruit();
+  updateHUD();
+  gameState='ready'; readyTimer=2;
+  playSound('start');
+}
+
+// ============================================================
+// 11. GAME LOOP
+// ============================================================
+const clock=new THREE.Clock();
+let lastTS=0;
+const FIXED=1/60;
+let accum=0;
+
+function animatePellets(t){
+  const s=1+.22*Math.sin(t*6);
+  pwrMeshes.forEach(m=>m.scale.setScalar(s));
+  if(fruitMesh){ fruitMesh.rotation.y+=.03; fruitMesh.position.y=.08*Math.sin(t*4); }
+}
+
+function loop(ts){
+  requestAnimationFrame(loop);
+  const rawDt=Math.min((ts-lastTS)/1000,.05);
+  lastTS=ts;
+  animatePellets(clock.getElapsedTime());
+
+  if(gameState==='idle'){ updateCamera(rawDt); renderer.render(scene,camera); return; }
+  if(gameState==='ready'){ readyTimer-=rawDt; if(readyTimer<=0) gameState='playing'; }
+
+  accum+=rawDt;
+  while(accum>=FIXED){
+    if(gameState==='playing'){
+      updatePac(FIXED);
+      checkPellets();
+      checkGhosts();
+      const bTile=ghosts[0]?ghosts[0].tile:{col:0,row:0};
+      ghosts.forEach(g=>g.update(FIXED,bTile));
+      if(fruitMesh){ fruitTimer-=FIXED; if(fruitTimer<=0) removeFruit(); }
+    }
+    accum-=FIXED;
+  }
+  updateCamera(rawDt);
+  renderer.render(scene,camera);
+}
+
+// Boot
+updateHUD();
+requestAnimationFrame(ts=>{ lastTS=ts; requestAnimationFrame(loop); });
+</script>
+</body>
+</html>
