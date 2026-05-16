@@ -129,8 +129,8 @@ canvas{display:block}
            oninput="applyCamSettings()">
   </div>
   <div class="sp-row">
-    <label>HEIGHT <span id="vHeight">2.5</span></label>
-    <input type="range" id="sHeight" min="0.5" max="10" step="0.5" value="2.5"
+    <label>HEIGHT <span id="vHeight">4.0</span></label>
+    <input type="range" id="sHeight" min="0.5" max="10" step="0.5" value="4"
            oninput="applyCamSettings()">
   </div>
   <div class="sp-row">
@@ -241,7 +241,8 @@ scene.background=new THREE.Color(0x000000);
 scene.fog=new THREE.FogExp2(0x000510,0.042);
 
 // Camera tuning (configurable via settings panel)
-let camCfg={ dist:4.0, height:2.5, fov:80 };
+let camCfg={ dist:4.0, height:4.0, fov:80 };
+let currentFov=80;   // lerped separately for ghost-proximity boost
 
 const camera=new THREE.PerspectiveCamera(camCfg.fov,innerWidth/innerHeight,0.1,130);
 camera.position.set(0,10,8);
@@ -773,20 +774,29 @@ function checkRelease(){
   });
 }
 
+// Convert world position → nearest tile (for collision)
+function worldTile(wx, wz){
+  return { col: Math.round(wx + OX), row: Math.round(wz + OZ) };
+}
+
 function checkGhosts(){
+  // Collision is tile-based: both entities must occupy the same maze tile.
+  // We derive each entity's "current tile" from its interpolated world position
+  // so crossing paths mid-tile also triggers correctly.
+  const pt = worldTile(pacMesh.position.x, pacMesh.position.z);
+
   for(const g of ghosts){
     if(g.inHouse) continue;
-    const dx=Math.abs(pacMesh.position.x-g.mesh.position.x);
-    const dz=Math.abs(pacMesh.position.z-g.mesh.position.z);
-    if(dx<.7&&dz<.7){
-      if(g.mode==='frightened'){
-        g.setEyes();
-        ghostCombo=Math.min(ghostCombo+1,4);
-        const pts=GHOST_PTS[ghostCombo-1];
-        addScore(pts); showMsg('+'+pts); playSound('ghostEat');
-      } else if(g.mode!=='eyes'){
-        triggerDeath(); return;
-      }
+    const gt = worldTile(g.mesh.position.x, g.mesh.position.z);
+    if(pt.col !== gt.col || pt.row !== gt.row) continue;
+
+    if(g.mode==='frightened'){
+      g.setEyes();
+      ghostCombo=Math.min(ghostCombo+1,4);
+      const pts=GHOST_PTS[ghostCombo-1];
+      addScore(pts); showMsg('+'+pts); playSound('ghostEat');
+    } else if(g.mode!=='eyes'){
+      triggerDeath(); return;
     }
   }
 }
@@ -875,6 +885,26 @@ function updateCamera(dt){
   camera.lookAt(camLook);
 }
 
+// Dynamic FOV — increases as dangerous ghosts get closer
+function updateDynamicFov(){
+  let minDist = 999;
+  for(const g of ghosts){
+    if(g.inHouse || g.mode==='frightened' || g.mode==='eyes') continue;
+    const dx = pacMesh.position.x - g.mesh.position.x;
+    const dz = pacMesh.position.z - g.mesh.position.z;
+    const d  = Math.sqrt(dx*dx + dz*dz);
+    if(d < minDist) minDist = d;
+  }
+  // +30° boost when ghost is on same tile, 0 at ≥7 tiles away
+  const boost   = Math.max(0, (7 - minDist) / 7) * 30;
+  const target  = camCfg.fov + boost;
+  currentFov   += (target - currentFov) * 0.08;   // smooth lerp
+  if(Math.abs(camera.fov - currentFov) > 0.2){
+    camera.fov = currentFov;
+    camera.updateProjectionMatrix();
+  }
+}
+
 // ============================================================
 // 10. AUDIO ENGINE
 // ============================================================
@@ -927,6 +957,7 @@ function applyCamSettings(){
   document.getElementById('vDist').textContent  =camCfg.dist.toFixed(1);
   document.getElementById('vHeight').textContent=camCfg.height.toFixed(1);
   document.getElementById('vFov').textContent   =camCfg.fov;
+  currentFov=camCfg.fov;   // reset lerp base when user moves slider
   camera.fov=camCfg.fov;
   camera.updateProjectionMatrix();
 }
@@ -1039,6 +1070,7 @@ function loop(ts){
     accum-=FIXED;
   }
   updateCamera(rawDt);
+  if(gameState==='playing'||gameState==='ready') updateDynamicFov();
   renderer.render(scene,camera);
 }
 
