@@ -407,6 +407,13 @@ function resetPac(){
   const {x,z}=tw(PAC_SPAWN.col,PAC_SPAWN.row);
   pacMesh.position.set(x,0,z);
   pacLight.position.set(x,1.2,z);
+  // Safety: always make Pac-Man visible and fully restored
+  pacMesh.visible=true;
+  pacMesh.scale.setScalar(1);
+  pacMesh.rotation.set(0,0,0);
+  pacMat.emissiveIntensity=1.6;
+  pacMat.color.setHex(0x00f5ff);
+  pacMat.emissive.setHex(0x00f5ff);
 }
 
 function updatePac(dt){
@@ -896,11 +903,13 @@ function updateDeathAnim(dt){
     sparks.forEach(s=>scene.remove(s));
     scene.remove(ring); scene.remove(ring2);
     deathFx=null;
-    // Restore Pac-Man mesh state for next round
+    // Fully restore Pac-Man mesh for the next life
+    pacMesh.visible=true;
     pacMesh.scale.setScalar(1);
-    pacMesh.rotation.z=0;
+    pacMesh.rotation.set(0,0,0);
     pacMat.emissiveIntensity=1.6;
-    pacMat.color.setHex(0x00f5ff); pacMat.emissive.setHex(0x00f5ff);
+    pacMat.color.setHex(0x00f5ff);
+    pacMat.emissive.setHex(0x00f5ff);
   }
 }
 
