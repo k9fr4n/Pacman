@@ -834,16 +834,40 @@ function toggleMute(){
 }
 
 // ============================================================
-// INPUT
+// INPUT  —  camera-relative controls
 // ============================================================
-const KEYMAP={
-  ArrowUp:{dc:0,dr:-1},ArrowDown:{dc:0,dr:1},
-  ArrowLeft:{dc:-1,dr:0},ArrowRight:{dc:1,dr:0},
-  w:{dc:0,dr:-1},s:{dc:0,dr:1},a:{dc:-1,dr:0},d:{dc:1,dr:0},
-};
+// Because the camera follows Pac-Man from behind, the screen axes
+// rotate with the camera. We project the pressed key onto the
+// camera's XZ plane and snap to the nearest maze axis so that
+// "Up" always means "forward on screen", "Left" = "left on screen", etc.
+const _cf=new THREE.Vector3(), _cr=new THREE.Vector3();
+const _worldUp=new THREE.Vector3(0,1,0);
+
+function camRelDir(fwd, right) {
+  // fwd:   +1 = up/forward key,  -1 = down/backward key
+  // right: +1 = right key,       -1 = left key
+  camera.getWorldDirection(_cf);
+  _cf.y=0;
+  if(_cf.lengthSq()<.0001) _cf.set(0,0,-1);
+  _cf.normalize();
+  // Camera's right vector in XZ plane
+  _cr.crossVectors(_worldUp,_cf).normalize();
+  const wx=fwd*_cf.x + right*_cr.x;
+  const wz=fwd*_cf.z + right*_cr.z;
+  // Snap to dominant axis
+  if(Math.abs(wx)>=Math.abs(wz)) return {dc:wx>0?1:-1, dr:0};
+  else                            return {dc:0, dr:wz>0?1:-1};
+}
+
 document.addEventListener('keydown',e=>{
   if(e.key==='m'||e.key==='M'){toggleMute();return;}
-  const d=KEYMAP[e.key];
+  let d=null;
+  switch(e.key){
+    case 'ArrowUp':    case 'w': case 'W': d=camRelDir( 1, 0); break;
+    case 'ArrowDown':  case 's': case 'S': d=camRelDir(-1, 0); break;
+    case 'ArrowLeft':  case 'a': case 'A': d=camRelDir( 0,-1); break;
+    case 'ArrowRight': case 'd': case 'D': d=camRelDir( 0, 1); break;
+  }
   if(d&&(gameState==='playing'||gameState==='ready')){
     pNextDir=d; ensureAudio(); e.preventDefault();
   }
