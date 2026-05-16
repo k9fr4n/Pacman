@@ -443,6 +443,8 @@ function updatePac(dt){
   pacMesh.position.set(src.x+dx*pProg,0,src.z+dz*pProg);
   pacMesh.rotation.y+=3.5*dt;
   pacLight.position.set(pacMesh.position.x,1.2,pacMesh.position.z);
+  // Keep lastPacDir up to date so controls stay relative to actual heading
+  if(pDir.dc||pDir.dr) lastPacDir={...pDir};
 }
 
 // ============================================================
@@ -1086,38 +1088,40 @@ document.addEventListener('click',e=>{
 });
 
 // ============================================================
-// INPUT  —  camera-relative controls
+// INPUT  —  Pac-Man-relative controls
 // ============================================================
-// The camera follows Pac-Man from behind; world axes rotate with it.
-// We project each key onto the camera's XZ forward/right vectors and
-// snap to the nearest maze axis — so the arrows always match the screen.
-const _cf=new THREE.Vector3(), _cr=new THREE.Vector3();
-const _worldUp=new THREE.Vector3(0,1,0);
+// Directions are always relative to Pac-Man's own heading, NOT the camera.
+// This avoids any camera-lag artefacts.
+//
+//   ArrowUp   / W  →  continue forward  (same as current heading)
+//   ArrowDown / S  →  go backward       (reverse)
+//   ArrowLeft / A  →  turn LEFT  relative to Pac-Man's heading
+//   ArrowRight/ D  →  turn RIGHT relative to Pac-Man's heading
+//
+// "Right of (dc,dr)" = 90° CW rotation = (-dr, dc).
+// We track lastPacDir (last non-zero direction) so controls stay
+// stable even when Pac-Man is momentarily stopped against a wall.
 
-function camRelDir(fwd, right) {
-  // fwd:   +1 = up/forward,  -1 = down/backward
-  // right: +1 = right,       -1 = left
-  camera.getWorldDirection(_cf);
-  _cf.y=0;
-  if(_cf.lengthSq()<.0001) _cf.set(0,0,-1); // fallback when looking straight down
-  _cf.normalize();
-  // Right vector = cross(forward, worldUp)  [right-hand rule: forward × up = right]
-  _cr.crossVectors(_cf, _worldUp).normalize();
-  const wx = fwd*_cf.x + right*_cr.x;
-  const wz = fwd*_cf.z + right*_cr.z;
-  // Snap to dominant maze axis
-  if(Math.abs(wx) >= Math.abs(wz)) return {dc: wx>0 ? 1 : -1, dr: 0};
-  else                              return {dc: 0, dr: wz>0 ? 1 : -1};
+let lastPacDir={dc:-1,dr:0};  // default heading: left (matches first pNextDir)
+
+function pacRelDir(fwd,right){
+  const fx=lastPacDir.dc, fz=lastPacDir.dr;
+  // 90° CW rotation of forward = right vector: (-fz, fx)
+  const rx=-fz, rz=fx;
+  const wx=fwd*fx + right*rx;
+  const wz=fwd*fz + right*rz;
+  if(Math.abs(wx)>=Math.abs(wz)) return {dc:wx>0?1:-1, dr:0};
+  else                            return {dc:0, dr:wz>0?1:-1};
 }
 
 document.addEventListener('keydown',e=>{
   if(e.key==='m'||e.key==='M'){toggleMute();return;}
   let d=null;
   switch(e.key){
-    case 'ArrowUp':    case 'w': case 'W': d=camRelDir( 1, 0); break;
-    case 'ArrowDown':  case 's': case 'S': d=camRelDir(-1, 0); break;
-    case 'ArrowLeft':  case 'a': case 'A': d=camRelDir( 0,-1); break;
-    case 'ArrowRight': case 'd': case 'D': d=camRelDir( 0, 1); break;
+    case 'ArrowUp':    case 'w': case 'W': d=pacRelDir( 1, 0); break;
+    case 'ArrowDown':  case 's': case 'S': d=pacRelDir(-1, 0); break;
+    case 'ArrowLeft':  case 'a': case 'A': d=pacRelDir( 0,-1); break;
+    case 'ArrowRight': case 'd': case 'D': d=pacRelDir( 0, 1); break;
   }
   if(d&&(gameState==='playing'||gameState==='ready')){
     pNextDir=d; ensureAudio(); e.preventDefault();
