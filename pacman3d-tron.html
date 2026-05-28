@@ -243,7 +243,7 @@ document.body.appendChild(renderer.domElement);
 
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0x000000);
-scene.fog=new THREE.FogExp2(0x000510,0.042);
+scene.fog=new THREE.FogExp2(0x00060c,0.048);
 
 // Camera tuning (configurable via settings panel)
 let camCfg={ dist:4.0, height:4.0, fov:80 };
@@ -252,9 +252,9 @@ let currentFov=80;   // lerped separately for ghost-proximity boost
 const camera=new THREE.PerspectiveCamera(camCfg.fov,innerWidth/innerHeight,0.1,130);
 camera.position.set(0,10,8);
 
-scene.add(new THREE.AmbientLight(0xffffff,0.025));
-scene.add(new THREE.HemisphereLight(0x001428,0x000000,0.07));
-const pacLight=new THREE.PointLight(0x00f5ff,1.8,10);
+scene.add(new THREE.AmbientLight(0xffffff,0.04));
+scene.add(new THREE.HemisphereLight(0x00b0d8,0x000000,0.12));
+const pacLight=new THREE.PointLight(0xffb84d,2.2,12);
 scene.add(pacLight);
 
 window.addEventListener('resize',()=>{
@@ -269,17 +269,77 @@ window.addEventListener('resize',()=>{
 const mazeGroup=new THREE.Group();
 scene.add(mazeGroup);
 
-const WALL_H=0.9;
-const wallGeo   =new THREE.BoxGeometry(1,WALL_H,1);
+// ── Server-rack walls (datacenter aisle look) ────────────────
+const WALL_H=1.7;                                 // taller = rack-like
+const wallGeo   =new THREE.BoxGeometry(.98,WALL_H,.98);
 const wallEdgeGeo=new THREE.EdgesGeometry(wallGeo);
-const wallMat   =new THREE.MeshStandardMaterial({color:0x001428,roughness:.88,metalness:.12});
-const edgeMat   =new THREE.LineBasicMaterial({color:0x00f5ff});
+// Dark glossy "smoked glass" body
+const wallMat   =new THREE.MeshStandardMaterial({
+  color:0x040810, emissive:0x001018, emissiveIntensity:.35,
+  roughness:.18, metalness:.85
+});
+const edgeMat   =new THREE.LineBasicMaterial({color:0x00f5ff,transparent:true,opacity:.95});
 
-// Floor plane
+// Vertical neon stripe (applied on each rack face) — pure emissive plane
+const neonStripeMat=new THREE.MeshBasicMaterial({color:0x66f5ff});
+const neonStripeGeo=new THREE.PlaneGeometry(.06,WALL_H*.78);
+
+// Base light strip along the floor (the bright cyan line in the image)
+const baseStripMat=new THREE.MeshBasicMaterial({color:0xa0faff});
+const baseStripGeo=new THREE.PlaneGeometry(1,.10);
+
+// ── Reflective circuit-board floor ──────────────────────────
+function makeCircuitTexture(){
+  const SZ=512;
+  const cv=document.createElement('canvas');cv.width=cv.height=SZ;
+  const g=cv.getContext('2d');
+  // Background
+  g.fillStyle='#01060e';
+  g.fillRect(0,0,SZ,SZ);
+  // Faint cyan grid
+  g.strokeStyle='rgba(0,180,210,.18)';g.lineWidth=1;
+  for(let i=0;i<=8;i++){
+    const p=i*SZ/8;
+    g.beginPath();g.moveTo(p,0);g.lineTo(p,SZ);g.stroke();
+    g.beginPath();g.moveTo(0,p);g.lineTo(SZ,p);g.stroke();
+  }
+  // Circuit traces
+  g.strokeStyle='rgba(0,245,255,.55)';g.lineWidth=2;
+  g.lineCap='round';
+  for(let i=0;i<60;i++){
+    const x=Math.floor(Math.random()*8)*64+32;
+    const y=Math.floor(Math.random()*8)*64+32;
+    const len=(1+Math.floor(Math.random()*3))*64;
+    const horiz=Math.random()<.5;
+    g.beginPath();g.moveTo(x,y);
+    if(horiz){g.lineTo(x+len,y);g.lineTo(x+len,y+(Math.random()<.5?-64:64));}
+    else     {g.lineTo(x,y+len);g.lineTo(x+(Math.random()<.5?-64:64),y+len);}
+    g.stroke();
+  }
+  // Solder pads (glowing dots)
+  for(let i=0;i<40;i++){
+    const x=Math.floor(Math.random()*8)*64+32;
+    const y=Math.floor(Math.random()*8)*64+32;
+    const r=g.createRadialGradient(x,y,0,x,y,7);
+    r.addColorStop(0,'rgba(160,250,255,.95)');
+    r.addColorStop(1,'rgba(0,245,255,0)');
+    g.fillStyle=r;g.beginPath();g.arc(x,y,7,0,Math.PI*2);g.fill();
+  }
+  const tex=new THREE.CanvasTexture(cv);
+  tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
+  tex.repeat.set(COLS/8,ROWS/8);
+  return tex;
+}
+
 const floorMesh=(()=>{
   const m=new THREE.Mesh(
     new THREE.PlaneGeometry(COLS,ROWS),
-    new THREE.MeshBasicMaterial({color:0x000814})
+    new THREE.MeshStandardMaterial({
+      map:makeCircuitTexture(),
+      color:0xffffff,
+      roughness:.35, metalness:.7,
+      emissive:0x002030, emissiveIntensity:.6
+    })
   );
   m.rotation.x=-Math.PI/2;
   m.position.y=-WALL_H/2-.01;
@@ -303,20 +363,67 @@ function makeGrid(){
     new THREE.LineBasicMaterial({color:0x00f5ff,transparent:true,opacity:.06}));
 }
 
+function isWall(c,r){
+  if(r<0||r>=ROWS) return false;
+  const cc=((c%COLS)+COLS)%COLS;
+  return maze[r][cc]===T_WALL;
+}
+
 function buildMaze(){
   while(mazeGroup.children.length) mazeGroup.remove(mazeGroup.children[0]);
   mazeGroup.add(floorMesh);
   mazeGroup.add(makeGrid());
+
+  const baseY=-WALL_H/2+.005;     // just above floor for light strips
+  const stripeY=0;                // neon stripe center Y on wall side
+
   for(let r=0;r<ROWS;r++){
     for(let c=0;c<COLS;c++){
-      if(maze[r][c]===T_WALL){
-        const {x,z}=tw(c,r);
-        const wm=new THREE.Mesh(wallGeo,wallMat);
-        wm.position.set(x,0,z);
-        mazeGroup.add(wm);
-        const we=new THREE.LineSegments(wallEdgeGeo,edgeMat);
-        we.position.set(x,0,z);
-        mazeGroup.add(we);
+      if(maze[r][c]!==T_WALL) continue;
+      const {x,z}=tw(c,r);
+
+      // Rack body
+      const wm=new THREE.Mesh(wallGeo,wallMat);
+      wm.position.set(x,0,z);
+      mazeGroup.add(wm);
+
+      // Cyan outline edges
+      const we=new THREE.LineSegments(wallEdgeGeo,edgeMat);
+      we.position.set(x,0,z);
+      mazeGroup.add(we);
+
+      // Vertical neon stripe + floor light strip — only on faces touching a corridor
+      // North (-z)
+      if(!isWall(c,r-1)){
+        const s=new THREE.Mesh(neonStripeGeo,neonStripeMat);
+        s.position.set(x,stripeY,z-.495); mazeGroup.add(s);
+        const b=new THREE.Mesh(baseStripGeo,baseStripMat);
+        b.rotation.x=-Math.PI/2;
+        b.position.set(x,baseY,z-.55); mazeGroup.add(b);
+      }
+      // South (+z)
+      if(!isWall(c,r+1)){
+        const s=new THREE.Mesh(neonStripeGeo,neonStripeMat);
+        s.position.set(x,stripeY,z+.495); s.rotation.y=Math.PI; mazeGroup.add(s);
+        const b=new THREE.Mesh(baseStripGeo,baseStripMat);
+        b.rotation.x=-Math.PI/2;
+        b.position.set(x,baseY,z+.55); mazeGroup.add(b);
+      }
+      // West (-x)
+      if(!isWall(c-1,r)){
+        const s=new THREE.Mesh(neonStripeGeo,neonStripeMat);
+        s.position.set(x-.495,stripeY,z); s.rotation.y=-Math.PI/2; mazeGroup.add(s);
+        const b=new THREE.Mesh(baseStripGeo,baseStripMat);
+        b.rotation.x=-Math.PI/2; b.rotation.z=Math.PI/2;
+        b.position.set(x-.55,baseY,z); mazeGroup.add(b);
+      }
+      // East (+x)
+      if(!isWall(c+1,r)){
+        const s=new THREE.Mesh(neonStripeGeo,neonStripeMat);
+        s.position.set(x+.495,stripeY,z); s.rotation.y=Math.PI/2; mazeGroup.add(s);
+        const b=new THREE.Mesh(baseStripGeo,baseStripMat);
+        b.rotation.x=-Math.PI/2; b.rotation.z=Math.PI/2;
+        b.position.set(x+.55,baseY,z); mazeGroup.add(b);
       }
     }
   }
@@ -329,8 +436,8 @@ buildMaze();
 const pelletGroup=new THREE.Group();
 scene.add(pelletGroup);
 
-const dotMat =new THREE.MeshStandardMaterial({color:0x00f5ff,emissive:0x00f5ff,emissiveIntensity:1.2});
-const pwrMat =new THREE.MeshStandardMaterial({color:0xffffff,emissive:0xffffff,emissiveIntensity:1.9});
+const dotMat =new THREE.MeshStandardMaterial({color:0xffe066,emissive:0xffc107,emissiveIntensity:1.4});
+const pwrMat =new THREE.MeshStandardMaterial({color:0xffffff,emissive:0xfff2b0,emissiveIntensity:2.2});
 const dotGeo =new THREE.SphereGeometry(.08,7,5);
 const pwrGeo =new THREE.SphereGeometry(.22,10,8);
 const fruitGeo=new THREE.IcosahedronGeometry(.28,0);
@@ -379,10 +486,44 @@ function removeFruit(){
 // ============================================================
 // 5.  PAC-MAN
 // ============================================================
+// ── Pac-Man : jaune doré, bouche + sourcil + traînée orange ──
 const pacMat=new THREE.MeshStandardMaterial({
-  color:0x00f5ff,emissive:0x00f5ff,emissiveIntensity:1.6,roughness:.2,metalness:.4
+  color:0xffd11a, emissive:0xffaa00, emissiveIntensity:1.4,
+  roughness:.25, metalness:.55
 });
-const pacMesh=new THREE.Mesh(new THREE.SphereGeometry(.38,22,14),pacMat);
+const pacMesh=new THREE.Group();
+const pacBody=new THREE.Mesh(new THREE.SphereGeometry(.38,28,18),pacMat);
+pacMesh.add(pacBody);
+
+// Bouche (wedge noir absorbant la lumière)
+const mouthMat=new THREE.MeshBasicMaterial({color:0x000000});
+const mouth=new THREE.Mesh(
+  new THREE.ConeGeometry(.30,.42,18,1,true),
+  mouthMat
+);
+mouth.rotation.z=-Math.PI/2;       // pointe vers +X (direction par défaut)
+mouth.position.set(.18,-.02,0);
+pacMesh.add(mouth);
+
+// Sourcil noir (plan incliné au-dessus)
+const browMat=new THREE.MeshBasicMaterial({color:0x000000});
+const brow=new THREE.Mesh(new THREE.BoxGeometry(.22,.05,.04),browMat);
+brow.position.set(.18,.20,0);
+brow.rotation.z=-0.35;             // angle "attitude"
+pacMesh.add(brow);
+
+// Traînée orange (light trail)
+const TRAIL_LEN=14;
+const trailPositions=new Float32Array(TRAIL_LEN*3);
+const trailGeo=new THREE.BufferGeometry();
+trailGeo.setAttribute('position',new THREE.BufferAttribute(trailPositions,3));
+const trailMat=new THREE.LineBasicMaterial({
+  color:0xff8a00, transparent:true, opacity:.85, linewidth:3
+});
+const trailLine=new THREE.Line(trailGeo,trailMat);
+scene.add(trailLine);
+const trailHistory=[];
+
 scene.add(pacMesh);
 
 let pTile   ={col:PAC_SPAWN.col,row:PAC_SPAWN.row};
@@ -407,13 +548,13 @@ function resetPac(){
   const {x,z}=tw(PAC_SPAWN.col,PAC_SPAWN.row);
   pacMesh.position.set(x,0,z);
   pacLight.position.set(x,1.2,z);
-  // Safety: always make Pac-Man visible and fully restored
   pacMesh.visible=true;
   pacMesh.scale.setScalar(1);
   pacMesh.rotation.set(0,0,0);
-  pacMat.emissiveIntensity=1.6;
-  pacMat.color.setHex(0x00f5ff);
-  pacMat.emissive.setHex(0x00f5ff);
+  pacMat.emissiveIntensity=1.4;
+  pacMat.color.setHex(0xffd11a);
+  pacMat.emissive.setHex(0xffaa00);
+  trailHistory.length=0;
 }
 
 function updatePac(dt){
@@ -441,9 +582,32 @@ function updatePac(dt){
   let dx=dst.x-src.x, dz=dst.z-src.z;
   if(Math.abs(dx)>COLS/2) dx=dx>0?dx-COLS:dx+COLS;
   pacMesh.position.set(src.x+dx*pProg,0,src.z+dz*pProg);
-  pacMesh.rotation.y+=3.5*dt;
+
+  // Orient le corps selon la direction (bouche devant)
+  if(pDir.dc||pDir.dr){
+    const yaw=Math.atan2(pDir.dc,pDir.dr) - Math.PI/2;
+    pacMesh.rotation.y=yaw;
+  }
+  // Mâchoire qui claque (open/close)
+  const chomp=(Math.sin(performance.now()*0.018)+1)*.5; // 0..1
+  const moving=(pDir.dc||pDir.dr)?1:0;
+  mouth.scale.set(1, .55+.55*chomp*moving, 1);
+  mouth.visible=moving>0||chomp>.5;
+
   pacLight.position.set(pacMesh.position.x,1.2,pacMesh.position.z);
-  // Keep lastPacDir up to date so controls stay relative to actual heading
+
+  // Traînée orange
+  trailHistory.unshift([pacMesh.position.x, .05, pacMesh.position.z]);
+  if(trailHistory.length>TRAIL_LEN) trailHistory.length=TRAIL_LEN;
+  for(let i=0;i<TRAIL_LEN;i++){
+    const p=trailHistory[i]||trailHistory[trailHistory.length-1]||[pacMesh.position.x,.05,pacMesh.position.z];
+    trailPositions[i*3  ]=p[0];
+    trailPositions[i*3+1]=p[1];
+    trailPositions[i*3+2]=p[2];
+  }
+  trailGeo.attributes.position.needsUpdate=true;
+  trailMat.opacity=moving?.85:.0;
+
   if(pDir.dc||pDir.dr) lastPacDir={...pDir};
 }
 
@@ -477,36 +641,50 @@ class Ghost{
 
   _buildMesh(){
     const hex=this.hexCol;
+    // Corps sombre translucide façon "wraith de datacenter"
     this.mat=new THREE.MeshStandardMaterial({
-      color:hex,emissive:hex,emissiveIntensity:1.3,
-      transparent:true,opacity:.92,roughness:.35
+      color:hex, emissive:hex, emissiveIntensity:.55,
+      transparent:true, opacity:.55, roughness:.55, metalness:.2
     });
     this.mesh=new THREE.Group();
     // Body
-    const body=new THREE.Mesh(new THREE.CylinderGeometry(.28,.32,.55,10),this.mat);
+    const body=new THREE.Mesh(new THREE.CylinderGeometry(.28,.32,.55,12),this.mat);
     body.position.y=.28;
     // Cap
-    const cap=new THREE.Mesh(new THREE.SphereGeometry(.28,10,8),this.mat);
+    const cap=new THREE.Mesh(new THREE.SphereGeometry(.28,12,10),this.mat);
     cap.position.y=.55;
     this.mesh.add(body,cap);
     // Skirt bumps
     for(let i=0;i<5;i++){
       const a=i/5*Math.PI*2;
-      const b=new THREE.Mesh(new THREE.SphereGeometry(.13,6,5),this.mat);
+      const b=new THREE.Mesh(new THREE.SphereGeometry(.13,7,6),this.mat);
       b.position.set(Math.cos(a)*.22,.04,Math.sin(a)*.22);
       this.mesh.add(b);
     }
-    // Eyes
-    const eMat=new THREE.MeshBasicMaterial({color:0xffffff});
-    const pMat=new THREE.MeshBasicMaterial({color:0x0000cc});
-    const eG=new THREE.SphereGeometry(.07,8,8);
-    const pG=new THREE.SphereGeometry(.035,6,6);
+    // Halo de contour néon (silhouette glowing en arrière-plan)
+    const haloMat=new THREE.MeshBasicMaterial({
+      color:hex, transparent:true, opacity:.18,
+      side:THREE.BackSide
+    });
+    const halo=new THREE.Mesh(new THREE.SphereGeometry(.36,14,10),haloMat);
+    halo.position.y=.4; halo.scale.set(1,1.3,1);
+    this.mesh.add(halo);
+
+    // YEUX — gros, blancs ultra-lumineux (le détail signature de l'image)
+    const eMat=new THREE.MeshBasicMaterial({color:0xeaffff});
+    const pMat=new THREE.MeshBasicMaterial({color:0x001428});
+    const eG=new THREE.SphereGeometry(.085,10,10);
+    const pG=new THREE.SphereGeometry(.042,8,8);
     this.eyeGroup=new THREE.Group();
     [-1,1].forEach(s=>{
-      const e=new THREE.Mesh(eG,eMat); e.position.set(s*.11,.55,.24);
-      const p=new THREE.Mesh(pG,pMat); p.position.set(s*.11,.55,.3);
+      const e=new THREE.Mesh(eG,eMat); e.position.set(s*.12,.56,.23);
+      const p=new THREE.Mesh(pG,pMat); p.position.set(s*.12,.56,.30);
       this.eyeGroup.add(e,p);
     });
+    // Petite lumière à l'intérieur de la tête pour faire "glowing eyes"
+    const eyeLight=new THREE.PointLight(0xccffff,.55,2);
+    eyeLight.position.set(0,.55,.18);
+    this.mesh.add(eyeLight);
     this.mesh.add(this.eyeGroup);
     scene.add(this.mesh);
     this.light=new THREE.PointLight(hex,.65,5);
